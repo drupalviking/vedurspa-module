@@ -1,0 +1,451 @@
+<?php
+include_once "simple_html_dom.php";
+/**
+ * Created by PhpStorm.
+ * User: drupalviking
+ * Date: 09/08/16
+ * Time: 10:35
+ */
+
+/**
+ * Implements hook_menu()
+ *
+ * @return mixed
+ */
+function vedurspa_menu(){
+  $items['admin/config/services/vedurspa'] = [
+    'title' => 'Veðurspá',
+    'description' => 'Stillingar sem tilheyra veðurspá.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => ['vedurspa_admin'],
+    'access arguments' => ['administer vedurspa settings'],
+    'type' => MENU_NORMAL_ITEM,
+  ];
+
+  $items['vedurspa/get/naesta-vedurstod'] = [
+    'page callback' => 'vedurspa_find_weather_station_from_coords_ajax',
+    'type' => MENU_CALLBACK,
+    'access arguments' => ['access content'],
+  ];
+
+  return $items;
+}
+
+/**
+ * Callback function
+ *
+ * @param $lat
+ * @param $long
+ */
+function vedurspa_find_weather_station_from_coords_ajax($lat, $long){
+  //$stations = _vedurspa_get_all_stations();
+  $stations = _vedurspa_get_all_stations_with_active_forecasts();
+  $response = null;
+  foreach($stations as $station){
+    $result = _vedurspa_haversine_great_circle_distance(
+      $lat, $long,
+      $station->field_lengd_decimal[LANGUAGE_NONE][0]['value'],
+      $station->field_breidd_decimal[LANGUAGE_NONE][0]['value']
+
+    );
+    $rounded= $result / 1000;
+    $rounded = round($rounded, 1);
+
+    $url = drupal_get_path_alias('node/' . $station->nid);
+    $response[$result] = ["<a href='/{$url}'>" . $station->title . "</a>", $rounded . "km"];
+  }
+
+  ksort($response);
+  $response = array_values($response);
+
+  drupal_json_output(array('status' => 0, 'data' => array_slice($response, 0, 10)));
+}
+
+/**
+ * Creates admin form for the settings for the block
+ *
+ * @return mixed Rendered form
+ */
+function vedurspa_admin(){
+  $form['webservices'] = [
+    '#type' => 'fieldset',
+    '#title' => 'Web services',
+  ];
+
+  $form['webservices']['vedurspa_web_service'] = [
+    '#type' => 'textfield',
+    '#title' =>  t('Path to Veðurstofa web services'),
+    '#default_value' => variable_get('vedurspa_web_service',
+      'http://xmlweather.vedur.is/?op_w=xml'),
+    '#required' => TRUE,
+  ];
+
+  return system_settings_form($form);
+}
+
+/**
+ * Implements hook_block_save()
+ */
+function vedurspa_admin_save($delta = '', $edit = []) {
+  variable_set('vedurspa_web_service',
+    $edit['vedurspa_web_service']
+  );
+}
+
+/**
+ * Implements hook_block_info
+ *
+ * @return mixed
+ */
+function vedurspa_block_info() {
+  $blocks['main-station-obs'] = [
+    'info' => t('Veðurathuganir aðalstöðva'),
+    'cache' => DRUPAL_NO_CACHE,
+  ];
+
+  $blocks['observations'] = [
+    'info' => t('Veðurathugun veðurstöðvar'),
+    'cache' => DRUPAL_NO_CACHE,
+  ];
+
+  $blocks['forecasts'] = [
+    'info' => t('Veðurspá frá veðurstöð'),
+    'cache' => DRUPAL_NO_CACHE,
+  ];
+
+  $blocks['weather_station'] = [
+    'info' => t('Veðurstöð'),
+    'cache' => DRUPAL_NO_CACHE,
+  ];
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view()
+ *
+ * @param string $delta
+ * @return string
+ */
+function vedurspa_block_view($delta = '') {
+  $output = '';
+  if ($delta == 'main-station-obs') {
+    $output = _vedurspa_create_main_station_html('observations');
+  }
+  elseif($delta == 'weather_station'){
+    $station = menu_get_object();
+    $output = _vedurspa_create_station_html($station);
+  }
+  elseif($delta == 'observations'){
+    $station = menu_get_object();
+    $output = _vedurspa_create_observation_for_station_html($station);
+  }
+  elseif($delta == 'forecasts'){
+    $station = menu_get_object();
+    if($station->field_gild_vedurspa[LANGUAGE_NONE][0]['value']){
+      $output = _vedurspa_create_forecasts_for_station_html($station);
+    }
+    else{
+      $output = "<div id='container'>Engin spágögn bárust</div>";
+    }
+  }
+
+  $block['content'] = $output;
+
+  return $block;
+}
+
+/**
+ * HELPER FUNCTIONS
+ */
+
+/**
+ * @param $obs_forec
+ * @return string
+ */
+function _vedurspa_create_main_station_html($obs_forec){
+  $stations = _vedurspa_get_all_main_stations();
+  $items = [];
+  foreach($stations as $station){
+    $time = strftime('%H:%M', $station->field_athugun_timi[LANGUAGE_NONE][0]['value']);
+    $wind_force = $station->field_athugun_styrkur[LANGUAGE_NONE][0]['value'];
+    $wind_direction = $station->field_athugun_stefna[LANGUAGE_NONE][0]['value'];
+    $wind_max_force = $station->field_athugun_max_styrkur[LANGUAGE_NONE][0]['value'];
+    $temperature = $station->field_athugun_hitastig[LANGUAGE_NONE][0]['value'];
+    $weather_description = $station->field_athugun_vedurlysing[LANGUAGE_NONE][0]['value'];
+    $weather_description_class = str_replace(' ', '_', strtolower(transliteration_get($station->field_athugun_vedurlysing[LANGUAGE_NONE][0]['value']), '_', 'is_IS'));
+    $station_name = $station->title;
+    $station_name_class = str_replace(' ', '_', strtolower(transliteration_get($station->title)));
+
+    $markup = "<div class='{$station_name_class}'>";
+    $markup .= "<h3>{$station_name}</h3>";
+    $markup .= "<p>{$time}</p>";
+    $markup .= "<div class='wind'>
+        <span class='direction'>{$wind_direction}</span>
+        <span class='force'>{$wind_force}</span>
+        <span class='max-force'>{$wind_max_force}</span>
+    </div>";
+    $markup .= "<span class='temp'>{$temperature}</span>";
+    $markup .= "<span class='weather {$weather_description_class}'>{$weather_description}</span>";
+    $markup .= "</div>";
+
+    $items['items'][] = $markup;
+  }
+
+  $items['type'] = 'ul';
+  $items['attributes'] = [
+    'id' => 'weather_listing',
+  ];
+
+  $output = theme_item_list($items);
+  return render($output);
+}
+
+function _vedurspa_create_station_html($station){
+  $markup = "<h2>{$station->title}</h2>";
+  $items = [];
+  $items['items'][] = "<span>Spásvæði: </span>" . _vedurspa_get_forecast_zone_by_key($station->field_spasvaedi[LANGUAGE_NONE][0]['value']);
+
+  $items['type'] = 'ul';
+  $items['attributes'] = [
+    'id' => 'weather_listing',
+  ];
+  $markup .= theme_item_list($items);
+
+
+  return render($markup);
+}
+
+function _vedurspa_create_observation_for_station_html($station){
+  $rows = [];
+  $rows[] = [['data'=> 'Tími'], ['data' => strftime('%H:%M', $station->field_athugun_timi[LANGUAGE_NONE][0]['value'])]];
+  $rows[] = [['data'=> 'Vindstefna'], ['data' => $station->field_athugun_stefna[LANGUAGE_NONE][0]['value']]];
+  $rows[] = [['data'=> 'Vindstyrkur'], ['data' => $station->field_athugun_styrkur[LANGUAGE_NONE][0]['value']]];
+  if(isset($station->field_athugun_max_hvida[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Mesti styrkur (hviða)'], ['data' => $station->field_athugun_max_hvida[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_max_styrkur[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Mesti styrkur'], ['data' => $station->field_athugun_max_styrkur[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_hitastig[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Hitastig'], ['data' => $station->field_athugun_hitastig[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_vedurlysing[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Veðurlýsing'], ['data' => $station->field_athugun_vedurlysing[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_upps_urkoma[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Uppsöfnuð úrkoma'], ['data' => $station->field_athugun_upps_urkoma[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_skyggni[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Skyggni'], ['data' => $station->field_athugun_skyggni[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_skyjahula[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Skýjahula'], ['data' => $station->field_athugun_skyjahula[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_loftthrystingur[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Loftþrýstingur'], ['data' => $station->field_athugun_loftthrystingur[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_rakastig[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Rakastig'], ['data' => $station->field_athugun_rakastig[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_lysing_snjo[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Lýsing á snjó'], ['data' => $station->field_athugun_lysing_snjo[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_snjodypt[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Snjódýpt'], ['data' => $station->field_athugun_snjodypt[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_snjolag[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Snjólag'], ['data' => $station->field_athugun_snjolag[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_vegahiti[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Vegahiti'], ['data' => $station->field_athugun_vegahiti[LANGUAGE_NONE][0]['value']]];
+  }
+  if(isset($station->field_athugun_daggarmark[LANGUAGE_NONE])){
+    $rows[] = [['data'=> 'Daggarmark'], ['data' => $station->field_athugun_daggarmark[LANGUAGE_NONE][0]['value']]];
+  }
+
+  $output = theme('table', array( 'rows' => $rows));
+
+  return render($output);
+}
+
+/**
+ * Creates markup for weather charts.  Renders the divs and the javascript needed
+ * to display
+ *
+ * @param $station
+ * @return string
+ */
+function _vedurspa_create_forecasts_for_station_html($station){
+  $output = "<div class='weather-chart'><h2>Þriggja daga spá með klst nákvæmni (harmonie líkan)</h2><div id='container-harmonie'></div></div>";
+  $output .= "<div class='weather-chart'><h2>Fjögurra daga spá með 3ja klst nákvæmni</h2><div id='container-ecm-three'></div>";
+  $output .= "<div class='weather-chart'><h2>Þriggja daga auka spá með 6 klst nákvæmni</h2><div id='container-ecm-six'></div>";
+  $output .= "<script>var response = " . $station->field_vedurspa_harmonie[LANGUAGE_NONE][0]['value'] . "; window.meteogram = new Meteogram(response, 'container-harmonie'); </script>";
+  $output .= "<script>var response = " . $station->field_vedurspa_ecm_three[LANGUAGE_NONE][0]['value'] . "; window.meteogram = new Meteogram(response, 'container-ecm-three'); </script>";
+  $output .= "<script>var response = " . $station->field_vedurspa_ecm_six[LANGUAGE_NONE][0]['value'] . "; window.meteogram = new Meteogram(response, 'container-ecm-six'); </script>";
+  return render($output);
+}
+
+/**
+ * Finds one weather station, based on it's station id (from Veðurstofa Íslands)
+ *
+ * @param $station_id
+ * @return bool|mixed|null
+ */
+function _vedurspa_find_station_by_id($station_id){
+  $results = null;
+  $query = new EntityFieldQuery;
+  $result = $query
+    ->entityCondition('entity_type', 'node')
+    ->propertyCondition('type', 'vedurstod')
+    ->propertyCondition('status', 1, '=')
+    ->fieldCondition('field_stodvarnumer', 'value', $station_id, '=')
+    ->execute();
+
+  if(sizeof($result) == 0){
+    return null;
+  }
+
+  $result = array_values($result['node']);
+  return node_load($result[0]->nid);
+}
+
+/**
+ * Finds one weather station, based on it's name.
+ *
+ * @param $station_name
+ * @return null
+ */
+function _vedurspa_search_station($station_number){
+  $results = null;
+  $query = new EntityFieldQuery;
+  $result = $query
+    ->entityCondition('entity_type', 'node')
+    ->propertyCondition('type', 'vedurstod')
+    ->propertyCondition('status', 1, '=')
+    ->fieldCondition('field_stodvarnumer', 'value', $station_number, '=')
+    ->execute();
+
+  if(sizeof($result) == 0){
+    return null;
+  }
+
+  $result = array_values($result['node']);
+  return $result[0];
+}
+
+/**
+ * Returns all weather stations available
+ *
+ * @return null|mixed $results
+ */
+function _vedurspa_get_all_stations(){
+  $results = null;
+  $query = new EntityFieldQuery;
+  $result = $query
+    ->entityCondition('entity_type', 'node')
+    ->propertyCondition('type', 'vedurstod')
+    ->propertyCondition('status', 1, '=')
+    ->execute();
+
+  if (!empty($result['node'])) {
+    $results = entity_load('node', array_keys($result['node']));
+  }
+
+  return $results;
+}
+
+/**
+ * Returns all weather stations available that have active forecast
+ *
+ * @return null|mixed $results
+ */
+function _vedurspa_get_all_stations_with_active_forecasts(){
+  $results = null;
+  $query = new EntityFieldQuery;
+  $result = $query
+    ->entityCondition('entity_type', 'node')
+    ->propertyCondition('type', 'vedurstod')
+    ->propertyCondition('status', 1, '=')
+    ->fieldCondition('field_gild_vedurspa', 'value', true, '=')
+    ->execute();
+
+  if (!empty($result['node'])) {
+    $results = entity_load('node', array_keys($result['node']));
+  }
+
+  return $results;
+}
+
+/**
+ * Returns a list of all weather stations that have the parameter Aðalstöð set
+ *
+ * @return null|mixed $results
+ */
+function _vedurspa_get_all_main_stations(){
+  $results = null;
+  $query = new EntityFieldQuery;
+  $result = $query
+    ->entityCondition('entity_type', 'node')
+    ->propertyCondition('type', 'vedurstod')
+    ->propertyCondition('status', 1, '=')
+    ->fieldCondition('field_adalstod', 'value', true, '=')
+    ->execute();
+
+  if (!empty($result['node'])) {
+    $results = entity_load('node', array_keys($result['node']));
+  }
+
+  return $results;
+}
+
+/**
+ * Returns the name of a forecast zone, by it's key
+ *
+ * @param $key
+ * @return string
+ */
+function _vedurspa_get_forecast_zone_by_key($key){
+  $forecast_zones = [
+    "fa" => "Faxaflói",
+    "br" => "Breiðafjörður",
+    "ve" => "Vestfirðir",
+    "nv" => "Strandir og Norðurland vestra",
+    "na" => "Norðurland eystra",
+    "ag" => "Austurland að Glettingi",
+    "af" => "Austfirðir",
+    "sa" => "Suðausturland",
+    "su" => "Suðurland",
+    "mi" => "Miðhálendið",
+  ];
+
+  return $forecast_zones[$key];
+}
+
+/**
+ * Calculates the great-circle distance between two points, with
+ * the Haversine formula.
+ * @param float $latitudeFrom Latitude of start point in [deg decimal]
+ * @param float $longitudeFrom Longitude of start point in [deg decimal]
+ * @param float $latitudeTo Latitude of target point in [deg decimal]
+ * @param float $longitudeTo Longitude of target point in [deg decimal]
+ * @param float $earthRadius Mean earth radius in [m]
+ * @return float Distance between points in [m] (same as earthRadius)
+ */
+function _vedurspa_haversine_great_circle_distance($latitudeFrom, $longitudeFrom, $latitudeTo, $longitudeTo, $earthRadius = 6371000) {
+  // convert from degrees to radians
+  $latFrom = deg2rad($latitudeFrom);
+  $lonFrom = deg2rad($longitudeFrom);
+  $latTo = deg2rad($latitudeTo);
+  $lonTo = deg2rad($longitudeTo);
+
+  $latDelta = $latTo - $latFrom;
+  $lonDelta = $lonTo - $lonFrom;
+
+  $angle = 2 * asin(sqrt(pow(sin($latDelta / 2), 2) +
+      cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)));
+
+  $result = $angle * $earthRadius;
+
+  return $result;
+}

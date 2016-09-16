@@ -1,0 +1,7 @@
+name = Veðurspá
+description = API to handle data from Veðurstofa Íslands
+core = 7.x
+package = RUV
+
+dependencies[] = block
+dependencies[] = highcharts (>1.0)

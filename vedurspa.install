@@ -1,0 +1,224 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install, update and uninstall functions for the trails module
+ *
+ * Download the schema module to auto-generate a schema array for a table:
+ * http://drupal.org/project/schema.
+ *
+ * In this file, we grab the output from the schema 'info' page, paste it
+ * in here and update the descriptions.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function vedurspa_install() {
+  _vedurspa_create_weather_station_content_type();
+}
+
+function vedurspa_enable() {
+  _vedurspa_create_weather_station_content_type();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function vedurspa_uninstall() {
+  _vedurspa_remove_content_type(['vedurstod']);
+}
+
+function vedurspa_disable(){
+  _vedurspa_remove_content_type(['vedurstod']);
+}
+
+function _vedurspa_create_weather_station_content_type(){
+  //CODE FROM THE DRUPAL WATCHDOG:  https://www.drupalwatchdog.com/volume-3/issue-2/drupal-7-content-types-code
+  //  The machine name of the content type can contain only lowercase alphanumeric
+  //  characters and underscores.
+  $type_name = 'vedurstod';
+
+  //  Verify the content type does not already exist. To instead get the node types
+  //  as objects, use node_type_get_types().
+  if ( in_array( $type_name, node_type_get_names() ) ) {
+    return;
+  }
+
+  //  Create the type definition array.
+  $type = array(
+    'type' => $type_name,
+    'name' => t( 'Veðurstöð' ),
+    'base' => 'node_content',
+    'description' => t( 'Geymir upplýsingar um veðurstöðvar í umsjá Veðurstofu Íslands' ),
+    'custom' => 1,
+    'modified' => 1,
+    'locked' => 0,
+  );
+  $type = node_type_set_defaults( $type );
+  node_type_save( $type );
+
+  $allowed_types = [
+    "automatic" => "Sjálfvirk veðurathugunarstöð",
+    "human" => "Mönnuð skeytastöð",
+    "other" => "Annað",
+  ];
+
+  $forecast_zones = [
+    "fa" => "Faxaflói",
+    "br" => "Breiðafjörður",
+    "ve" => "Vestfirðir",
+    "nv" => "Strandir og Norðurland vestra",
+    "na" => "Norðurland eystra",
+    "ag" => "Austurland að Glettingi",
+    "af" => "Austfirðir",
+    "sa" => "Suðausturland",
+    "su" => "Suðurland",
+    "mi" => "Miðhálendið",
+  ];
+
+  //Add the extra fields to the content type
+  _vedurspa_add_fields_to_bundle("field_vedurstodvartegund", "list_text", "vedurstod",
+    "Tegund stöðvar (Sjálfvirk, mönnuð etc.", "Tegund stöðvar", "options_select", $allowed_types);
+  _vedurspa_add_fields_to_bundle("field_adalstod", "list_boolean", $type_name,
+    "Aðalstöðvarnar eru alltaf birtar á veðurkortur, aukastöðvar ekki", "Aðalstöð",
+    "options_onoff", [0 => 'Ekki aðalstöð',1 => 'Aðalstöð']);
+  _vedurspa_add_fields_to_bundle("field_stodvarnumer", "text", "vedurstod",
+    "Stöðvarnúmer stöðvarinnar (notað til að leita að veðurathugunum og veðurspám",
+    "Stöðvarnúmer", "textfield");
+  _vedurspa_add_fields_to_bundle("field_wmo_numer", "text", "vedurstod", "WMO Númer",
+    "WMO Númer", "textfield");
+  _vedurspa_add_fields_to_bundle("field_vedurstodvarskammstofun", "text", "vedurstod",
+    "Skammstöfun stöðvarinnar", "Skammstöfun", "textfield");
+  _vedurspa_add_fields_to_bundle("field_spasvaedi", "list_text", "vedurstod", "Spásvæði",
+    "Spásvæði", "options_select", $forecast_zones);
+  _vedurspa_add_fields_to_bundle("field_lengd_gradur", "text", "vedurstod",
+    "Lengdarstaðsetning (í gráðum)", "Lengd (Gráður)", "textfield");
+  _vedurspa_add_fields_to_bundle("field_breidd_gradur", "text", "vedurstod",
+    "Breiddarstaðsetning (í gráðum)", "Breidd (Gráður)", "textfield");
+  _vedurspa_add_fields_to_bundle("field_lengd_decimal", "text", "vedurstod",
+    "Lengdarstaðsetning (í decimal)", "Lengd (Decimal)", "textfield");
+  _vedurspa_add_fields_to_bundle("field_breidd_decimal", "text", "vedurstod",
+    "Breiddarstaðsetning (í decimal)", "Breidd (Decimal)", "textfield");
+  _vedurspa_add_fields_to_bundle("field_haed_yfir_sjo", "text", "vedurstod",
+    "Hæð yfir sjávarmáli", "Hæð yfir sjó", "textfield");
+  _vedurspa_add_fields_to_bundle("field_upphaf_athugana", "text", "vedurstod",
+    "Upphaf veðurathugana", "Upphaf athugana", "textfield");
+  _vedurspa_add_fields_to_bundle("field_eigandi_stodvar", "text", "vedurstod",
+    "Eigandi stöðvarinnar", "Eigandi stöðvar", "textfield");
+  _vedurspa_add_fields_to_bundle("field_gild_vedurspa", "list_boolean", $type_name,
+    "Staðfestir hvort gild veðurspá hafi komið við síðustu athugun",
+    "Gild veðurspá","options_onoff", [0 => 'Ógild veðurspá',1 => 'Gild veðurspá']);
+  _vedurspa_add_fields_to_bundle("field_gild_vedurathugun", "list_boolean", $type_name,
+    "Staðfestir hvort gild veðurathugun hafi komið við síðustu athugun",
+    "Gild veðurathugun","options_onoff", [0 => 'Ógild veðurathugun',1 => 'Gild veðurathugun']);
+  _vedurspa_add_fields_to_bundle("field_vedurspa_harmonie", "text_long", $type_name,
+    "Veðurspá (á json formi) úr Harmonie líkaninu", "Veðurspá", "text_textarea");
+  _vedurspa_add_fields_to_bundle("field_vedurspa_ecm_three", "text_long", $type_name,
+    "Veðurspá (á json formi) úr ECM líkaninu, með 3klst nákvæmni", "Veðurspá", "text_textarea");
+  _vedurspa_add_fields_to_bundle("field_vedurspa_ecm_six", "text_long", $type_name,
+    "Veðurspá (á json formi) úr ECM líkaninu, með 6klst nákvæmni", "Veðurspá", "text_textarea");
+  _vedurspa_add_fields_to_bundle("field_vedurspa_timi", "datestamp", $type_name,
+    "Veðurathugun frá klukkan", "Veðurathugun(tími)", "date_select");
+  _vedurspa_add_fields_to_bundle("field_athugun_timi", "datestamp", $type_name,
+    "Veðurspá frá klukkan", "Veðurspá(tími)", "date_select");
+  _vedurspa_add_fields_to_bundle("field_athugun_styrkur", "number_integer",
+    $type_name, "Vindstyrkur", "Vindstyrkur", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_stefna", "text", $type_name,
+    "Vindstefna", "Vindstefna", "textfield");
+  _vedurspa_add_fields_to_bundle("field_athugun_max_styrkur", "number_integer",
+    $type_name, "Mesti vindstyrkur", "Mesti vindstyrkur", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_max_hvida", "number_integer",
+    $type_name, "Mesta vindhviða", "Mesta vindhviða", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_hitastig", "number_decimal",
+    $type_name, "Hitastig", "Hitastig", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_vedurlysing", "text_long", $type_name,
+    "Veðurlýsing", "Veðurlýsing", "text_textarea");
+  _vedurspa_add_fields_to_bundle("field_athugun_skyggni", "text", $type_name,
+    "Skyggni", "Skyggni", "textfield");
+  _vedurspa_add_fields_to_bundle("field_athugun_skyjahula", "text", $type_name,
+    "Skýjahula", "Skýjahula", "textfield");
+  _vedurspa_add_fields_to_bundle("field_athugun_loftthrystingur", "text", $type_name,
+    "Loftþrýstingur", "Loftþrýstingur", "textfield");
+  _vedurspa_add_fields_to_bundle("field_athugun_rakastig", "text", $type_name,
+    "Rakastig", "Rakastig", "textfield");
+  _vedurspa_add_fields_to_bundle("field_athugun_lysing_snjo", "text_long", $type_name,
+    "Lýsing á snjó", "Lýsing á snjó", "text_textarea");
+  _vedurspa_add_fields_to_bundle("field_athugun_snjodypt", "number_integer", $type_name,
+    "Snjódýpt", "Snjódýpt", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_snjolag", "text", $type_name,
+    "Snjólag", "Snjólag", "textfield");
+  _vedurspa_add_fields_to_bundle("field_athugun_vegahiti", "number_decimal", $type_name,
+    "Vegahiti", "Vegahiti", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_daggarmark", "number_decimal",
+    $type_name, "Daggarmark", "Daggarmark", "number");
+  _vedurspa_add_fields_to_bundle("field_athugun_upps_urkoma", "number_integer",
+    $type_name, "Uppsöfnuð úrkoma", "Uppsöfnuð úrkoma", "number");
+}
+
+function _vedurspa_remove_content_type(array $type_name){
+  foreach($type_name as $type){
+    if (in_array($type, array_keys(node_type_get_names()))) {
+      node_type_delete($type_name);
+    }
+  }
+}
+
+/**
+ * Created a function for this code, since I have to use it multiple times.
+ *
+ * It took a long time to find the correct place to run the allowed values code,
+ * since that setting is not within the instance, but within the field creation
+ * itself.
+ *
+ * @param $field_machine_name
+ * @param $field_type
+ * @param $bundle
+ * @param $field_description
+ * @param $field_label
+ * @param $widget
+ * @param null $allowed_values
+ * @throws \Exception
+ * @throws \FieldException
+ */
+function _vedurspa_add_fields_to_bundle(
+  $field_machine_name, $field_type, $bundle, $field_description, $field_label,
+  $widget, $allowed_values = null
+){
+  //  The machine name of the field can contain only lowercase alphanumeric characters and underscores.
+  $field_name = $field_machine_name;
+
+  //  Verify the field does not already exist.
+  if ( !field_info_field( $field_name ) ) {
+    //  Create the field definition array.
+    $field = array(
+      'field_name' => $field_name,
+      'type' => $field_type,
+    );
+
+    if($allowed_values){
+      $field['settings'] = ['allowed_values' => $allowed_values];
+    }
+    //  Create the field.
+    $field = field_create_field( $field );
+  }
+  else{
+    $field = field_info_field($field_name);
+  }
+
+  //  Create the field instance definition array.
+  $instance = array(
+    'field_name' => $field[ 'field_name' ],
+    'entity_type' => 'node',
+    'bundle' => $bundle,
+    'description' => $field_description,
+    'label' => $field_label,
+    'widget' => array(
+      'type' => $widget,
+    ),
+  );
+
+//  Create an instance of the field and bind it to the bundle.
+  field_create_instance($instance);
+}
